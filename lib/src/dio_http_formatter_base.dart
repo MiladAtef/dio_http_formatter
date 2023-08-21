@@ -5,6 +5,9 @@ import 'package:logger/logger.dart';
 
 typedef HttpLoggerFilter = bool Function();
 
+const _prefix = 'dio_http_formatter';
+const _startTimeKey = '$_prefix@start_time';
+
 class HttpFormatter extends Interceptor {
   // Logger object to pretty print the HTTP Request
   final Logger _logger;
@@ -48,9 +51,7 @@ class HttpFormatter extends Interceptor {
 
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
-    options.extra = <String, dynamic>{
-      'start_time': DateTime.now().millisecondsSinceEpoch
-    };
+    options.extra[_startTimeKey] = DateTime.now().millisecondsSinceEpoch;
     super.onRequest(options, handler);
   }
 
@@ -78,8 +79,9 @@ class HttpFormatter extends Interceptor {
 
   /// Whether to pretty print a JSON or return as regular String
   String _getBody(dynamic data, String? contentType) {
-    if (contentType != null &&
-        contentType.toLowerCase().contains('application/json')) {
+    final type = contentType?.toLowerCase();
+    if (type?.contains('application/json') == true ||
+        type?.contains('application/x-www-form-urlencoded') == true) {
       final encoder = JsonEncoder.withIndent('  ');
       // Since the JSON could be a Map or List
       dynamic jsonBody;
@@ -89,6 +91,8 @@ class HttpFormatter extends Interceptor {
         jsonBody = data;
       }
       return encoder.convert(jsonDecode(jsonEncode(jsonBody)));
+    } else if (type?.contains("multipart/form-data") == true) {
+      return JsonEncoder.withIndent('  ').convert(formDataToJson(data));
     } else {
       return data.toString();
     }
@@ -142,7 +146,7 @@ class HttpFormatter extends Interceptor {
     if (_includeResponse && response != null) {
       responseString =
           '⤵ RESPONSE [${response.statusCode}/${response.statusMessage}] '
-          '${requestOptions?.extra['start_time'] != null ? '[Time elapsed: ${DateTime.now().millisecondsSinceEpoch - requestOptions?.extra['start_time']} ms]' : ''}'
+          '${requestOptions?.extra[_startTimeKey] != null ? '[Time elapsed: ${DateTime.now().millisecondsSinceEpoch - requestOptions?.extra[_startTimeKey]} ms]' : ''}'
           '⤵\n\n';
 
       if (_includeResponseHeaders) {
@@ -158,5 +162,21 @@ class HttpFormatter extends Interceptor {
     }
 
     return requestString + responseString;
+  }
+
+  Map<String, dynamic> formDataToJson(FormData formData) {
+    final map = <String, dynamic>{};
+    for (final entry in formData.fields) {
+      map[entry.key] = entry.value;
+    }
+    for (final file in formData.files) {
+      var responseString = "[application/octet-stream; ";
+      if (file.value.filename != null) {
+        responseString += "filename=${file.value.filename}; ";
+      }
+      responseString += "length=${file.value.length}]";
+      map[file.key] = responseString;
+    }
+    return map;
   }
 }
